@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
     <title>Music Search</title>
     <style>
         body {
@@ -11,6 +11,7 @@
             padding: 0;
             background: #343541;
             height: 100vh;
+            height: 100dvh; /* Dynamic viewport height for mobile */
             overflow: hidden;
         }
         
@@ -18,6 +19,7 @@
             display: flex;
             flex-direction: column;
             height: 100vh;
+            height: 100dvh; /* Dynamic viewport height for mobile */
             background: #343541;
         }
         
@@ -78,6 +80,7 @@
         
         .input-area {
             padding: 24px;
+            padding-bottom: calc(24px + env(safe-area-inset-bottom)); /* Safe area for mobile */
             background: #343541;
             flex-shrink: 0;
         }
