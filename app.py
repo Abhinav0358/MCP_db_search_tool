@@ -154,8 +154,13 @@ class LLMWithMCP:
                 Database search results:
                 {db_result}
                 
-                Please provide a helpful, conversational response based on these results. 
-                If no results were found, suggest alternative searches.
+                IMPORTANT: This is a music database containing mainly Western artists like Metallica, Led Zeppelin, AC/DC, Queen, Beatles, etc. and genres like Rock, Jazz, Blues, Classical, Metal, Pop, Alternative, etc.
+                
+                Please provide a helpful, conversational response based ONLY on these actual results. 
+                If no results were found, suggest alternative searches using ONLY artists, genres, or terms that actually exist in this database.
+                DO NOT suggest artists or genres that are not in the database (like Bollywood, Indian classical, K-pop, etc.).
+                
+                Instead, suggest searching for similar Western artists or genres that ARE in the database.
                 """
                 
                 print("[WEB-APP] Formatting results with Gemini LLM...")
@@ -176,7 +181,15 @@ class LLMWithMCP:
     async def normal_chat(self, user_query: str) -> str:
         """Normal LLM conversation"""
         try:
-            response = self.model.generate_content(user_query)
+            # Add context about the database to prevent hallucinations
+            context_prompt = f"""
+            User query: {user_query}
+            
+            Note: If this is about music, I have access to a Western music database with artists like Metallica, Beatles, Queen, Led Zeppelin, AC/DC, etc. and genres like Rock, Jazz, Blues, Classical, Metal, Pop, Alternative, etc. I should not mention artists or music that aren't in this database.
+            
+            Response:
+            """
+            response = self.model.generate_content(context_prompt)
             return response.text
         except Exception as e:
             return f"Sorry, I encountered an error: {e}"
@@ -224,4 +237,5 @@ if __name__ == '__main__':
     print("Initializing MCP server...")
     run_async(llm.start_mcp_server())
     print("Starting Flask app...")
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(debug=False, host='0.0.0.0', port=port)
