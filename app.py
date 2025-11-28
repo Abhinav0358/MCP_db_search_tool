@@ -20,6 +20,7 @@ class LLMWithMCP:
         self.mcp_process = None
         self.model = genai.GenerativeModel('gemini-2.5-flash')
         self.loop = None
+        self.vocabulary = self._load_vocabulary()
         
     async def start_mcp_server(self):
         """Start the MCP server for database queries"""
@@ -95,16 +96,21 @@ class LLMWithMCP:
         else:
             return f"Database search failed: {response}"
     
+    def _load_vocabulary(self):
+        """Load vocabulary from file or generate basic one"""
+        try:
+            with open('vocabulary.json', 'r') as f:
+                vocab = json.load(f)
+                print(f"[WEB-APP] Loaded {len(vocab)} vocabulary terms from file")
+                return vocab
+        except FileNotFoundError:
+            print("[WEB-APP] vocabulary.json not found, using basic vocabulary")
+            return ['artist', 'singer', 'band', 'musician', 'album', 'song', 'track', 'music', 'rock', 'jazz', 'pop']
+    
     def should_use_database(self, user_query: str) -> bool:
-        """Smart detection using fuzzy matching"""
+        """Smart detection using fuzzy matching with comprehensive vocabulary"""
         try:
             from fuzzywuzzy import process
-            
-            music_vocabulary = [
-                'artist', 'singer', 'band', 'musician', 'album', 'song', 'track', 'music',
-                'rock', 'jazz', 'pop', 'metal', 'blues', 'classical', 'country', 'playlist',
-                'metallica', 'beatles', 'queen', 'led zeppelin', 'nirvana'
-            ]
             
             words = user_query.lower().split()
             music_score = 0
@@ -112,7 +118,7 @@ class LLMWithMCP:
             for word in words:
                 if len(word) < 3:
                     continue
-                best_match, score = process.extractOne(word, music_vocabulary)
+                best_match, score = process.extractOne(word, self.vocabulary)
                 if score > 60:
                     music_score += score
             

@@ -1,6 +1,8 @@
 # Music Database Search
 
-AI assistant with music database search using MCP.
+A tool that allows chatting with an LLM, which calls an MCP tool whenever the query requires searching the database. It also includes spelling correction so the database can be searched even with incorrect spellings.
+
+
 
 ## Setup
 
@@ -25,15 +27,7 @@ AI assistant with music database search using MCP.
    http://localhost:5000
    ```
 
-## Usage
-
-- Ask general questions: "What is AI?"
-- Search music database: "rock artists", "albums by metallica"
-- The system automatically decides when to use the database
-
-## Files
-
-- `app.py` - Web interface
 - `mcp_server_fallback.py` - Database search server
 - `chinook.db` - Music database
 - `.env` - API key
+

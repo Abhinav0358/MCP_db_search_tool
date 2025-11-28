@@ -47,88 +47,77 @@ def execute_sql_query(query: str) -> List[Dict[str, Any]]:
 
 
 
+def interpret_query_with_llm(user_query: str) -> str:
+    """Use LLM to interpret query and generate SQL"""
+    schema_info = """
+    Database Schema:
+    - customers: CustomerId, FirstName, LastName, Company, Address, City, State, Country, PostalCode, Phone, Fax, Email
+    - artists: ArtistId, Name
+    - albums: AlbumId, Title, ArtistId
+    - tracks: TrackId, Name, AlbumId, MediaTypeId, GenreId, Composer, Milliseconds, Bytes, UnitPrice
+    - genres: GenreId, Name
+    - employees: EmployeeId, LastName, FirstName, Title, ReportsTo, BirthDate, HireDate, Address, City, State, Country
+    - invoices: InvoiceId, CustomerId, InvoiceDate, BillingAddress, BillingCity, BillingState, BillingCountry, Total
+    - invoice_items: InvoiceLineId, InvoiceId, TrackId, UnitPrice, Quantity
+    """
+    
+    prompt = f"""
+    Given this database schema:
+    {schema_info}
+    
+    Convert this natural language query to SQL:
+    "{user_query}"
+    
+    Rules:
+    - Return ONLY the SQL query, no explanation
+    - Use proper JOINs when needed
+    - Limit results to 20 rows
+    - Use LIKE with % wildcards for text searches
+    - For location queries like "customers in New York", search City, State, and Country columns
+    
+    Examples:
+    - "customers in New York" -> SELECT c.FirstName, c.LastName, c.City, c.State, c.Country FROM customers c WHERE c.City LIKE '%New York%' OR c.State LIKE '%New York%' OR c.Country LIKE '%New York%' LIMIT 20
+    - "artists like metallica" -> SELECT a.Name as Artist FROM artists a WHERE a.Name LIKE '%metallica%' LIMIT 20
+    - "rock songs" -> SELECT t.Name as Track, a.Name as Artist, g.Name as Genre FROM tracks t JOIN albums al ON t.AlbumId = al.AlbumId JOIN artists a ON al.ArtistId = a.ArtistId JOIN genres g ON t.GenreId = g.GenreId WHERE g.Name LIKE '%rock%' LIMIT 20
+    
+    SQL:
+    """
+    
+    try:
+        import google.generativeai as genai
+        import os
+        from dotenv import load_dotenv
+        
+        load_dotenv()
+        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        
+        response = model.generate_content(prompt)
+        sql = response.text.strip()
+        
+        # Clean up the response (remove markdown formatting if present)
+        if sql.startswith('```sql'):
+            sql = sql[6:]
+        if sql.startswith('```'):
+            sql = sql[3:]
+        if sql.endswith('```'):
+            sql = sql[:-3]
+        
+        return sql.strip()
+        
+    except Exception as e:
+        print(f"[MCP-SERVER] LLM interpretation failed: {e}")
+        # Fallback to simple query
+        return "SELECT a.Name as Artist FROM artists a LIMIT 20"
+
 def generate_sql_from_keywords(user_query: str) -> str:
-    """Generate SQL using keyword matching patterns"""
+    """Generate SQL using LLM interpretation"""
     print(f"[MCP-SERVER] *** STARTING SQL GENERATION ***")
     print(f"[MCP-SERVER] Original query: '{user_query}'")
     
-    # Spell correction is now handled by the web app layer
-    query_lower = user_query.lower().replace("'", "").replace('"', '')
-    print(f"[MCP-SERVER] Cleaned query: '{query_lower}'")
+    # Use LLM to interpret the query
+    sql = interpret_query_with_llm(user_query)
     
-    # Pattern matching for different query types
-    artist_keywords = ['artist', 'singer', 'band', 'musician', 'performer', 'vocalist', 'composer', 'group', 'duo', 'trio']
-    genre_keywords_extended = {
-        'rock': 'Rock', 'metal': 'Metal', 'jazz': 'Jazz', 'pop': 'Pop', 'blues': 'Blues', 'classical': 'Classical',
-        'country': 'Country', 'folk': 'Folk', 'punk': 'Punk', 'reggae': 'Reggae', 'electronic': 'Electronic',
-        'dance': 'Dance', 'alternative': 'Alternative', 'indie': 'Alternative', 'grunge': 'Rock',
-        'funk': 'Funk', 'soul': 'Soul', 'gospel': 'Gospel', 'opera': 'Classical'
-    }
-    
-    if any(word in query_lower for word in artist_keywords):
-        if any(word in query_lower for word in genre_keywords_extended.keys()):
-            # Artists by genre
-            for keyword, genre in genre_keywords_extended.items():
-                if keyword in query_lower:
-                    sql = f"SELECT DISTINCT a.Name as Artist, g.Name as Genre, COUNT(t.TrackId) as TrackCount FROM artists a JOIN albums al ON a.ArtistId = al.ArtistId JOIN tracks t ON al.AlbumId = t.AlbumId JOIN genres g ON t.GenreId = g.GenreId WHERE g.Name LIKE '%{genre}%' GROUP BY a.ArtistId, a.Name, g.Name ORDER BY TrackCount DESC LIMIT 20"
-                    print(f"[MCP-SERVER] Matched genre pattern: {keyword} -> {genre}")
-                    print(f"[MCP-SERVER] Generated SQL: {sql}")
-                    return sql
-        
-        # Search for specific artist names
-        stop_words = ['the', 'and', 'who', 'sing', 'artist', 'singer', 'band', 'musician', 'performer', 'by', 'from', 'with']
-        artist_words = [word for word in query_lower.split() if len(word) > 2 and word not in stop_words]
-        if artist_words:
-            search_term = artist_words[0].replace("'", "").replace('"', '')
-            sql = f"SELECT a.Name as Artist, COUNT(al.AlbumId) as Albums, COUNT(t.TrackId) as Tracks FROM artists a LEFT JOIN albums al ON a.ArtistId = al.ArtistId LEFT JOIN tracks t ON al.AlbumId = t.AlbumId WHERE a.Name LIKE '%{search_term}%' GROUP BY a.ArtistId, a.Name ORDER BY Albums DESC LIMIT 20"
-            print(f"[MCP-SERVER] Matched artist search: {search_term}")
-            print(f"[MCP-SERVER] Generated SQL: {sql}")
-            return sql
-    
-    elif any(word in query_lower for word in ['album', 'record', 'disc', 'cd', 'vinyl', 'lp', 'ep', 'release']):
-        # Album searches
-        album_stop_words = ['the', 'and', 'album', 'record', 'disc', 'cd', 'vinyl', 'lp', 'ep', 'release', 'by', 'from']
-        album_words = [word for word in query_lower.split() if len(word) > 2 and word not in album_stop_words]
-        if album_words:
-            search_term = album_words[0].replace("'", "").replace('"', '')
-            return f"SELECT al.Title as Album, a.Name as Artist, COUNT(t.TrackId) as Tracks FROM albums al JOIN artists a ON al.ArtistId = a.ArtistId LEFT JOIN tracks t ON al.AlbumId = t.AlbumId WHERE al.Title LIKE '%{search_term}%' OR a.Name LIKE '%{search_term}%' GROUP BY al.AlbumId, al.Title, a.Name ORDER BY Tracks DESC LIMIT 20"
-    
-    elif any(word in query_lower for word in ['track', 'song', 'music', 'tune', 'melody', 'hit', 'single']):
-        # Track searches
-        if any(word in query_lower for word in ['long', 'duration', 'minute']):
-            return "SELECT t.Name as Track, a.Name as Artist, al.Title as Album, ROUND(t.Milliseconds/60000.0, 2) as Minutes FROM tracks t JOIN albums al ON t.AlbumId = al.AlbumId JOIN artists a ON al.ArtistId = a.ArtistId WHERE t.Milliseconds > 300000 ORDER BY t.Milliseconds DESC LIMIT 20"
-        
-        track_stop_words = ['the', 'and', 'track', 'song', 'music', 'tune', 'melody', 'hit', 'single', 'by', 'from']
-        track_words = [word for word in query_lower.split() if len(word) > 2 and word not in track_stop_words]
-        if track_words:
-            search_term = track_words[0].replace("'", "").replace('"', '')
-            return f"SELECT t.Name as Track, a.Name as Artist, al.Title as Album, g.Name as Genre FROM tracks t JOIN albums al ON t.AlbumId = al.AlbumId JOIN artists a ON al.ArtistId = a.ArtistId LEFT JOIN genres g ON t.GenreId = g.GenreId WHERE t.Name LIKE '%{search_term}%' ORDER BY t.Name LIMIT 20"
-    
-    elif any(word in query_lower for word in ['genre', 'style', 'type']):
-        # Genre searches
-        return "SELECT g.Name as Genre, COUNT(t.TrackId) as TrackCount FROM genres g LEFT JOIN tracks t ON g.GenreId = t.GenreId GROUP BY g.GenreId, g.Name ORDER BY TrackCount DESC LIMIT 20"
-    
-    elif any(word in query_lower for word in ['country', 'indian', 'american', 'british', 'brazilian', 'canadian', 'australian', 'german', 'french', 'italian']):
-        # Country-based searches (using customer data as proxy)
-        country_keywords = {
-            'indian': 'India', 'american': 'USA', 'british': 'United Kingdom', 'brazilian': 'Brazil',
-            'canadian': 'Canada', 'australian': 'Australia', 'german': 'Germany', 'french': 'France',
-            'italian': 'Italy', 'spanish': 'Spain', 'japanese': 'Japan', 'korean': 'South Korea'
-        }
-        
-        for keyword, country in country_keywords.items():
-            if keyword in query_lower:
-                return f"SELECT c.Country, COUNT(*) as CustomerCount FROM customers c WHERE c.Country LIKE '%{country}%' GROUP BY c.Country LIMIT 20"
-    
-    # Default: search all artists
-    search_words = [word for word in query_lower.split() if len(word) > 2]
-    if search_words:
-        search_term = search_words[0].replace("'", "").replace('"', '')
-        return f"SELECT a.Name as Artist, COUNT(al.AlbumId) as Albums FROM artists a LEFT JOIN albums al ON a.ArtistId = al.ArtistId WHERE a.Name LIKE '%{search_term}%' GROUP BY a.ArtistId, a.Name ORDER BY Albums DESC LIMIT 20"
-    
-    # Fallback: show popular artists
-    sql = "SELECT a.Name as Artist, COUNT(al.AlbumId) as Albums, COUNT(t.TrackId) as Tracks FROM artists a LEFT JOIN albums al ON a.ArtistId = al.ArtistId LEFT JOIN tracks t ON al.AlbumId = t.AlbumId GROUP BY a.ArtistId, a.Name ORDER BY Albums DESC, Tracks DESC LIMIT 20"
-    print(f"[MCP-SERVER] Using fallback query")
     print(f"[MCP-SERVER] Generated SQL: {sql}")
     return sql
 
